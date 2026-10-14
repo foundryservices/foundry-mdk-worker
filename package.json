@@ -1,0 +1,54 @@
+{
+  "name": "foundry-mdk-worker",
+  "version": "0.1.0",
+  "description": "Foundry USA Pool worker for Tether MDK",
+  "keywords": [
+    "tether",
+    "mdk",
+    "foundry",
+    "minerpool"
+  ],
+  "author": "Foundry Digital",
+  "license": "Apache-2.0",
+  "main": "index.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "type": "commonjs",
+  "files": [
+    "index.js",
+    "mdk-contract.json",
+    "src/",
+    "mock/",
+    "config/*.example",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "setup:mdk": "npm --prefix node_modules/@tetherto/mdk install --ignore-scripts",
+    "setup:local": "node -e \"const fs=require('fs'),p='node_modules/@tetherto/mdk';fs.rmSync(p,{recursive:true,force:true});fs.symlinkSync(require('path').resolve(process.env.MDK_DIR||'../mdk'),p,'dir');console.log(p,'->',fs.realpathSync(p))\"",
+    "lint": "standard",
+    "lint:fix": "standard --fix",
+    "mock": "node mock/server.js",
+    "verify:live": "node examples/verify-live.js",
+    "test": "npm run lint && npm run test:unit && npm run test:integration",
+    "test:unit": "NODE_ENV=test brittle tests/unit/**/*.test.js",
+    "test:integration": "NODE_ENV=test brittle tests/integration/**/*.test.js",
+    "test:coverage": "NODE_ENV=test brittle --coverage 'tests/**/*.test.js'"
+  },
+  "peerDependencies": {
+    "@tetherto/mdk": "*"
+  },
+  "devDependencies": {
+    "@hyperswarm/rpc": "3.5.0",
+    "@tetherto/mdk": "git+https://github.com/tetherto/mdk.git#7f5cae88f67cd0ebedaa325778f9209135de1b8f",
+    "brittle": "3.18.0",
+    "fastify": "5.12.5",
+    "hyperdht": "6.34.0",
+    "standard": "17.1.0"
+  },
+  "overrides": {
+    "brace-expansion": "5.0.12"
+  }
+}

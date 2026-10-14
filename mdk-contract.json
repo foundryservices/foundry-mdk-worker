@@ -1,0 +1,66 @@
+{
+  "$schema": "./node_modules/@tetherto/mdk/backend/core/mdk-worker/mdk-contract.schema.json",
+  "metadata": {
+    "provider": "foundry",
+    "deviceFamily": "minerpool",
+    "brand": "Foundry USA Pool",
+    "modelsSupported": [
+      "FOUNDRY-BTC"
+    ],
+    "overview": "Reports Foundry USA Pool sub-account hashrate, active workers, unpaid balance and daily earnings over the read-only customer REST API, authenticated with a per-sub-account API key or a personal access token."
+  },
+  "capabilities": {
+    "telemetry": [
+      {
+        "name": "hashrate",
+        "unit": "H/s",
+        "type": "number",
+        "handler": "src/telemetry/hashrate.js",
+        "description": "Pool-side 5 minute average hashrate across configured sub-accounts."
+      },
+      {
+        "name": "workers_online",
+        "unit": "",
+        "type": "number",
+        "handler": "src/telemetry/workers-online.js",
+        "description": "Workers with a share in the last 15 minutes across configured sub-accounts."
+      },
+      {
+        "name": "balance",
+        "unit": "BTC",
+        "type": "number",
+        "handler": "src/telemetry/balance.js",
+        "description": "Unpaid credited balance summed across sub-accounts."
+      },
+      {
+        "name": "estimated_earnings",
+        "unit": "BTC",
+        "type": "number",
+        "handler": "src/telemetry/estimated-earnings.js",
+        "description": "Projected income for the current UTC day: the latest settled FPPS day scaled by the current 24h hashrate."
+      }
+    ],
+    "commands": [],
+    "config": {
+      "schema": "foundry_config_v1"
+    },
+    "health": {
+      "supportedStates": [
+        "OK",
+        "DEGRADED",
+        "OFFLINE"
+      ],
+      "alerts": [
+        "alert.pool_unreachable",
+        "alert.hashrate_low"
+      ],
+      "troubleshooting": [
+        "If alert.pool_unreachable, verify apiUrl, each sub-account's credential, and outbound HTTPS connectivity.",
+        "If alert.hashrate_low, cross-check the fleet's own hashrate before escalating."
+      ]
+    },
+    "errors": {
+      "E_POOL_API": "Pool REST API request failed"
+    }
+  }
+}

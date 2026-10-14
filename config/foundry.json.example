@@ -1,0 +1,8 @@
+{
+  "apiUrl": "https://api.foundryusapool.com",
+  "coin": "BTC",
+  "apiKey": "",
+  "accounts": [
+    { "name": "subaccount1", "apiKey": "" }
+  ]
+}

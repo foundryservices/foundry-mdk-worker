@@ -1,0 +1,7 @@
+Foundry MDK Worker
+Copyright 2026 Foundry Digital LLC
+
+This product is a Worker for the Tether MDK project, which is licensed
+under the Apache License, Version 2.0. It builds on the MDK PoolService
+and WorkerRuntime and follows the layout of the MDK F2Pool and Ocean
+workers.
