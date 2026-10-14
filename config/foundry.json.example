@@ -1,5 +1,5 @@
 {
-  "apiUrl": "https://api.foundryusapool.com",
+  "apiUrl": "https://api.pool.foundrydigital.com",
   "coin": "BTC",
   "apiKey": "",
   "accounts": [

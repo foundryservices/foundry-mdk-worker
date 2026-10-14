@@ -96,7 +96,7 @@ monorepo layout.
 
 | API setting | Default | Meaning |
 | --- | --- | --- |
-| `apiUrl` | `https://api.foundryusapool.com` | Base URL, no path |
+| `apiUrl` | `https://api.pool.foundrydigital.com` | Base URL, no path |
 | `coin` | `BTC` | Only Bitcoin is supported. Any other value fails `init()` |
 | `accounts` | Required | Sub-accounts to poll, see below. Foundry has no master account, so the list cannot be empty |
 | `apiKey` | none | Default credential for accounts that do not carry their own |

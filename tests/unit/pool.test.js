@@ -55,7 +55,7 @@ test('index exports the pool class, boot and plugin', t => {
 test('wtype defaults to foundry and the http url to the production API', t => {
   const pool = new FoundryPool({ foundry: { accounts: ['a'], apiKey: 'k' } }, { rack: 'r1' })
   t.is(pool.wtype, POOL_TYPE)
-  t.is(pool.getHttpUrl(), 'https://api.foundryusapool.com')
+  t.is(pool.getHttpUrl(), 'https://api.pool.foundrydigital.com')
   t.is(new FoundryPool({ foundry: { apiUrl: 'https://api.example.test' } }, { rack: 'r' }).getHttpUrl(), 'https://api.example.test')
   t.is(pool.appendPoolType([{}])[0].poolType, 'foundry')
 })

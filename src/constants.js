@@ -8,7 +8,7 @@ const DAY_MS = 24 * HOUR_MS
 module.exports = {
   COIN: 'BTC',
   POOL_TYPE: 'foundry',
-  DEFAULT_API_URL: 'https://api.foundryusapool.com',
+  DEFAULT_API_URL: 'https://api.pool.foundrydigital.com',
 
   // The Foundry API reports every hashrate figure in GH/s; MDK wants H/s.
   GHS: 1e9,
