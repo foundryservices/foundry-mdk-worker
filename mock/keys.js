@@ -4,5 +4,7 @@
 module.exports = {
   subAccount: 'test',
   apiKey: 'test-api-key',
+  // Authenticates, but is refused on the balance, earnings and transaction routes.
+  technicianKey: 'test-technician-key',
   pat: 'fdpat_test-personal-access-token'
 }

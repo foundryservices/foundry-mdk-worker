@@ -35,12 +35,29 @@ function dayRange (query, defaultSpanMs) {
  *
  * @param {object} opts
  * @param {Object<string, object>} opts.accounts   sub-account name -> state
- * @param {Object<string, string>} opts.apiKeys    sub-account name -> accepted X-API-KEY
+ * @param {Object<string, string>} opts.apiKeys    sub-account name -> accepted X-API-KEY with financial access
+ * @param {Object<string, string>} [opts.technicianKeys]  sub-account name -> accepted X-API-KEY without
+ *                                                  financial access: 403 on balance, earnings and transactions
  * @param {string[]} opts.pats                      accepted `fdpat_` bearer tokens (all accounts)
  * @param {number} [opts.delayMs]                   added latency per request
  * @param {boolean} [opts.error]                    answer 500 on every route
+ * @param {number} [opts.rateLimit]                 requests per minute per credential (default 300)
  */
-module.exports = async function routes (fastify, { accounts, apiKeys, pats, delayMs = 0, error = false }) {
+module.exports = async function routes (fastify, { accounts, apiKeys, technicianKeys = {}, pats, delayMs = 0, error = false, rateLimit = 300 }) {
+  // One window per credential, as the real API meters it: the counter lives on
+  // the key or token, not on the client address.
+  const windows = new Map()
+  const meter = credential => {
+    const now = Date.now()
+    let w = windows.get(credential)
+    if (!w || now >= w.resetAt) {
+      w = { used: 0, resetAt: Math.ceil(now / 60000) * 60000 }
+      windows.set(credential, w)
+    }
+    w.used++
+    return { limit: rateLimit, remaining: Math.max(rateLimit - w.used, 0), resetAt: w.resetAt, exceeded: w.used > rateLimit }
+  }
+
   fastify.addHook('onRequest', async (req, res) => {
     if (delayMs) await new Promise(resolve => setTimeout(resolve, delayMs))
     if (error) {
@@ -48,6 +65,17 @@ module.exports = async function routes (fastify, { accounts, apiKeys, pats, dela
     }
     const path = req.url.split('?')[0]
     if (PUBLIC_PATHS.includes(path)) return
+
+    const credential = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1]?.trim() || req.headers['x-api-key']
+    if (credential) {
+      const { limit, remaining, resetAt, exceeded } = meter(credential)
+      res.header('x-ratelimit-limit', String(limit))
+      res.header('x-ratelimit-remaining', String(remaining))
+      res.header('x-ratelimit-reset', String(Math.floor(resetAt / 1000)))
+      if (exceeded) {
+        return res.code(429).send(envelope(429, 'Too Many Requests', 'Rate limit exceeded', path))
+      }
+    }
 
     const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')
     if (bearer) {
@@ -62,10 +90,16 @@ module.exports = async function routes (fastify, { accounts, apiKeys, pats, dela
       return res.code(403).send(envelope(403, '403 FORBIDDEN', 'Not authenticated', path))
     }
     const owner = Object.keys(apiKeys).find(name => apiKeys[name] === key)
-    if (!owner) {
-      return res.code(403).send(envelope(403, '403 FORBIDDEN', 'Invalid API key', path))
+    if (owner) {
+      req.principal = { account: owner, financial: true }
+      return
     }
-    req.principal = { account: owner }
+    const technician = Object.keys(technicianKeys).find(name => technicianKeys[name] === key)
+    if (technician) {
+      req.principal = { account: technician, financial: false }
+      return
+    }
+    return res.code(403).send(envelope(403, '403 FORBIDDEN', 'Invalid API key', path))
   })
 
   // Resolves the sub-account for a scoped route: unknown name -> 404, a key
@@ -81,6 +115,14 @@ module.exports = async function routes (fastify, { accounts, apiKeys, pats, dela
     }
     return handler(req, res, state)
   }
+
+  // Money routes additionally need financial access on the key.
+  const financial = handler => scoped((req, res, state) => {
+    if (req.principal.financial === false) {
+      return res.code(403).send(envelope(403, '403 FORBIDDEN', 'API key provided does not have permission to view payments.', req.url))
+    }
+    return handler(req, res, state)
+  })
 
   fastify.get('/ping', async () => 'pong')
   fastify.get('/pool_stats', async () => generatePoolStats())
@@ -108,16 +150,16 @@ module.exports = async function routes (fastify, { accounts, apiKeys, pats, dela
     res.send({ workersList: list, totalWorkerCount: total })
   }))
 
-  fastify.get('/balance/:subAccountName', scoped((req, res, state) => res.send(state.balance)))
+  fastify.get('/balance/:subAccountName', financial((req, res, state) => res.send(state.balance)))
 
-  const earnings = scoped((req, res, state) => {
+  const earnings = financial((req, res, state) => {
     const { start, end } = unixRange(req.query, 30 * DAY_MS)
     res.send(generateEarnings(start, end, state.hashrateGhs))
   })
   fastify.get('/earnings/:subAccountName', earnings)
   fastify.get('/v2/earnings/:subAccountName', earnings)
 
-  fastify.get('/transactions/:subAccountName', scoped((req, res, state) => {
+  fastify.get('/transactions/:subAccountName', financial((req, res, state) => {
     const { start, end } = unixRange(req.query, 30 * DAY_MS)
     res.send(generateTransactions(start, end, state.hashrateGhs))
   }))

@@ -15,15 +15,24 @@ module.exports = {
   BTC_SATS: 100000000,
 
   // Credentials: a sub-account API key travels as X-API-KEY; a personal
-  // access token (Trust Center) carries this prefix and travels as a Bearer.
+  // access token (My Profile → Personal Access Token tab) carries this prefix and travels as a Bearer.
   API_KEY_HEADER: 'X-API-KEY',
   AUTH_HEADER: 'Authorization',
   PAT_PREFIX: 'fdpat_',
 
-  // The API rate limit, where enabled, is 300 requests per minute per client.
-  // 250 ms spacing caps one worker at 240 and leaves headroom.
+  // The API rate limit is 300 requests per minute per API key, or per user
+  // for a personal access token; it is not per IP. 250 ms spacing caps one
+  // worker at 240 and leaves headroom for other users of the same credential.
   REQUEST_INTERVAL_MS: 250,
   REQUEST_TIMEOUT_MS: 30 * SECOND_MS,
+  // Every response carries x-ratelimit-remaining and x-ratelimit-reset (unix
+  // seconds). When the budget is spent, or the API answers 429, the client
+  // waits for the reset before the next request on that credential, never
+  // longer than one window plus slack, and retries a 429 this many times.
+  RATE_LIMIT_MAX_WAIT_MS: 65 * SECOND_MS,
+  RATE_LIMIT_RETRIES: 2,
+  // Wait before a retry when a 429 carries no usable reset or retry-after.
+  RATE_LIMIT_FALLBACK_WAIT_MS: 2 * SECOND_MS,
 
   // Foundry counts a worker as active when its last share is within 15 minutes.
   WORKER_ONLINE_WINDOW_MS: 15 * MINUTE_MS,

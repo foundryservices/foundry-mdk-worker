@@ -5,6 +5,7 @@ const FoundryPool = require('../../src/pool')
 const { FOUNDRY_POOL } = require('../..')
 const { GHS, STATS_MAX_AGE_MS, POOL_TYPE } = require('../../src/constants')
 const { monthKey } = require('../../src/utils/dates')
+const { FoundryApiError } = require('../../src/errors')
 
 const ACCT = {
   name: 'sub1',
@@ -136,6 +137,54 @@ test('fetchStats fails the whole poll when one account fails, naming it, and met
   pool.foundryApi.getSubAccountStats = async () => ACCT
   await pool.fetchStats(new Date())
   t.is(pool.getMetric('hashrate'), 200 * GHS)
+})
+
+test('a credential without financial access keeps hashrate and nulls the money fields', async t => {
+  const denied = path => { throw new FoundryApiError(path, 403, 'AUTH', 'Forbidden') }
+  const logs = []
+  const pool = newPool(undefined, {
+    getBalance: async () => denied('/balance/sub1'),
+    getEarnings: async () => denied('/v2/earnings/sub1'),
+    getTransactions: async () => denied('/transactions/sub1')
+  })
+  pool._logErr = (...args) => logs.push(args.join(' '))
+
+  await pool.fetchStats(new Date())
+  const [s] = pool.data.statsData.stats
+  t.is(s.hashrate, 100 * GHS)
+  t.is(s.active_workers_count, 2)
+  t.is(s.balance, null)
+  t.is(s.revenue_24h, null)
+  t.is(s.estimated_today_income, null)
+  t.is(s.total_earned, null)
+  t.is(s.total_withdrawn, null)
+  t.is(s.total_pool_fees, null)
+  t.alike(s.yearlyBalances, [])
+  t.is(s.financial_access, false)
+  t.is(pool.getMetric('hashrate'), 100 * GHS, 'hashrate telemetry still answers')
+  t.exception(() => pool.getMetric('balance'), /E_POOL_API: Foundry balance is unavailable/)
+  t.exception(() => pool.getMetric('estimated_today_income'), /E_POOL_API/)
+  t.is((await pool.getWrkExtData({ query: { key: 'stats' } })).error, null, 'the poll counts as clean')
+
+  await pool.fetchStats(new Date())
+  t.is(logs.length, 1, 'the refusal is logged once, not every minute')
+  t.ok(/WARN_FOUNDRY_FINANCIAL sub1/.test(logs[0]), logs[0])
+
+  await pool.fetchTransactions(new Date(Date.UTC(2024, 5, 28, 0, 0, 5)))
+  t.alike(pool.transactionsDb.puts[0].transactions, [], 'the daily ledger stores an empty day')
+
+  // Access restored: the flag clears and the figures come back.
+  pool.foundryApi.getBalance = async () => BAL
+  pool.foundryApi.getEarnings = async () => [EARNING]
+  await pool.fetchStats(new Date())
+  t.is(pool.data.statsData.stats[0].balance, 0.5)
+  t.is(pool.data.statsData.stats[0].financial_access, true)
+
+  // Only an AUTH refusal is tolerated; any other money-endpoint failure still fails the poll.
+  pool.foundryApi.getBalance = async () => { throw new FoundryApiError('/balance/sub1', 500, 'SERVER') }
+  await t.exception(pool.fetchStats(new Date()), /ERR_FOUNDRY_ACCOUNT sub1: .*500 SERVER/)
+  const plain = newPool(undefined, { getBalance: async () => { throw new Error('ERR_FOUNDRY_API /balance/sub1 403 AUTH') } })
+  await t.exception(plain.fetchStats(new Date()), /ERR_FOUNDRY_ACCOUNT sub1/, 'a non-client error is never read as a scope refusal')
 })
 
 test('fetchStats rejects a malformed field instead of recording zero', async t => {

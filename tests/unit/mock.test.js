@@ -35,6 +35,39 @@ test('mock enforces the Foundry auth gate with its status codes and envelopes', 
   t.is(unknown.status, 404)
 })
 
+test('a technician key authenticates but is refused on the money routes', async t => {
+  const { app, apiUrl } = await createServer({ port: 0, workerCount: 1 })
+  t.teardown(() => app.close())
+  const get = path => fetch(`${apiUrl}${path}`, { headers: { 'X-API-KEY': keys.technicianKey } })
+  t.is((await get('/subaccount_stats/test')).status, 200)
+  t.is((await get('/workers/test')).status, 200)
+  t.is((await get('/subaccount_hashrate_hour/test')).status, 200)
+  for (const path of ['/balance/test', '/v2/earnings/test', '/earnings/test', '/transactions/test']) {
+    const res = await get(path)
+    t.is(res.status, 403, path)
+    t.is((await res.json()).message, 'API key provided does not have permission to view payments.', path)
+  }
+  t.is((await get('/balance/nope')).status, 404, 'unknown sub-account still wins over scope')
+})
+
+test('the mock meters requests per credential and answers 429 with the rate-limit headers', async t => {
+  const { app, apiUrl } = await createServer({ port: 0, workerCount: 1, rateLimit: 2 })
+  t.teardown(() => app.close())
+  const get = key => fetch(`${apiUrl}/subaccount_stats/test`, { headers: { 'X-API-KEY': key } })
+  const first = await get(keys.apiKey)
+  t.is(first.status, 200)
+  t.is(first.headers.get('x-ratelimit-limit'), '2')
+  t.is(first.headers.get('x-ratelimit-remaining'), '1')
+  t.ok(Number(first.headers.get('x-ratelimit-reset')) * 1000 > Date.now(), 'reset is a future unix-seconds timestamp')
+  t.is((await get(keys.apiKey)).status, 200)
+  const third = await get(keys.apiKey)
+  t.is(third.status, 429)
+  t.is(third.headers.get('x-ratelimit-remaining'), '0')
+  t.is((await third.json()).message, 'Rate limit exceeded')
+  t.is((await get(keys.technicianKey)).status, 200, 'another credential has its own window')
+  t.is((await fetch(`${apiUrl}/pool_stats`)).status, 200, 'public routes are not metered')
+})
+
 test('a key issued for another sub-account is forbidden; a PAT sees every account', async t => {
   const createState = require('../../mock/state')
   const { app, apiUrl } = await createServer({

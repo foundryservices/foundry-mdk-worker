@@ -111,13 +111,26 @@ local config file or in environment variables.
 The API accepts two credential types; the worker picks the header from the
 value:
 
-- **Sub-account API key** (Settings → API keys in the pool UI), sent as
+- **Sub-account API key** (Sub-account → Links & API tab in the pool UI), sent as
   `X-API-KEY`. Foundry issues these per sub-account and a key only ever sees
-  the sub-account it was issued for, so each entry needs its own.
-- **Personal access token** (Trust Center → Personal access tokens),
+  the sub-account it was issued for, so each entry needs its own. Create the
+  key with **financial** access: a technician key authenticates but is
+  refused on the balance, earnings and transaction endpoints, see below.
+- **Personal access token** (My Profile → Personal Access Token tab),
   recognised by its `fdpat_` prefix and sent as `Authorization: Bearer`. A
   token is user-scoped and read-only, so one token in `apiKey` can cover every
   sub-account its user can see.
+
+A credential without financial access still works, with less data. The
+worker notices when `/subaccount_stats` succeeds and `/balance`,
+`/v2/earnings` or `/transactions` then answer 403 with the same credential.
+It keeps polling, reports the hashrate and worker figures, sets `balance`,
+`revenue_24h`, `estimated_today_income` and the lifetime totals to `null`,
+leaves `yearlyBalances` empty, marks the account `financial_access: false`,
+and logs `WARN_FOUNDRY_FINANCIAL <sub>` once. The `balance` and
+`estimated_earnings` metrics answer `E_POOL_API` for as long as that lasts;
+`hashrate` and `workers_online` are unaffected. Swap in a financial key and
+the next poll fills the fields back in.
 
 ## Telemetry
 
@@ -145,7 +158,9 @@ rejected credential, an unknown sub-account or a malformed field fails the
 poll, the error and the log name the sub-account, and the metrics answer
 `E_POOL_API` until a clean poll. The worker never sums the sub-accounts that
 happened to work and reports that as the total, and it never substitutes
-zero for a reading it did not get. The one place a zero can stand in for an
+zero for a reading it did not get. The exception is a credential without
+financial access, described under Credentials: the poll completes with the
+money fields `null`. The one place a zero can stand in for an
 absence is the earnings ledger: an account with no settled rows in the window
 reports `revenue_24h`, `estimated_today_income` and the monthly totals as
 `0`, because the API does not distinguish an idle account from an empty
@@ -158,7 +173,8 @@ The `stats` extension carries the per-account values: the common fields
 `hashrate`, `hashrate_1h`, `hashrate_24h`, `hashrate_stale_1h`,
 `worker_count`, `active_workers_count`, `yearlyBalances`) plus Foundry extras
 (`hashrate_15m`, `hashrate_reject_1h`, `offline_workers_count`,
-`last_share_time`, `total_earned`, `total_withdrawn`, `total_pool_fees`). Per-worker rows
+`last_share_time`, `total_earned`, `total_withdrawn`, `total_pool_fees`,
+`financial_access`). Per-worker rows
 add `hashrate_15m`, `stale_15m_percent`, `reject_15m_percent` and `tag`.
 `unsettled` and `hashrate_stale_24h` are `null` because the API does not
 expose them, and `worker_count` is `null` until the first workers poll. `yearlyBalances` holds earnings credited per month for the
@@ -202,9 +218,18 @@ customer credential does not carry.
 
 Every call is a GET with `coin=BTC` and the credential header. All calls,
 including history pages, go through one queue that spaces them 250 ms
-apart, which keeps one worker under the API's 300 requests per minute limit
-where it is enabled. If several processes share one outbound IP, they share
-that budget too, and nothing in the worker coordinates them. Requests time
+apart, which keeps one worker under the API's limit of 300 requests per
+minute. The limit is per API key, or per user for a personal access token,
+not per IP. Several processes using the same credential share that budget,
+and nothing in the worker coordinates them. Every response reports the
+budget in `x-ratelimit-limit`, `x-ratelimit-remaining` and
+`x-ratelimit-reset` (unix seconds). When `remaining` reaches zero the next
+request on that credential waits for the reset, and a 429 waits for the
+reset (or `retry-after`) and is retried twice before it fails the poll as
+`RATE_LIMITED`. No wait exceeds 65 seconds. Because the request queue is
+serial, a paused credential also holds the others; one worker on its own
+never spends the budget, so a pause means something else is using the same
+credential. Requests time
 out after 30 seconds, abort when the worker stops, and do not follow
 redirects. Error messages carry the API's short error message ("Invalid API
 key", "Not authenticated"), or the socket error code when no response
@@ -234,7 +259,8 @@ for API trouble.
 | `ERR_FOUNDRY_API <path> 403 AUTH (Not authenticated)` | No credential reached the API |
 | `ERR_FOUNDRY_API <path> 401 AUTH (...)` | Invalid or expired personal access token |
 | `ERR_FOUNDRY_API <path> 404 NOT_FOUND` | Unknown sub-account |
-| `ERR_FOUNDRY_API <path> 429 RATE_LIMITED` | Rate limit hit; another process is probably sharing the IP |
+| `ERR_FOUNDRY_API <path> 429 RATE_LIMITED` | Still rate limited after waiting for the window reset and retrying twice; another process is using the same credential's 300 requests per minute |
+| `WARN_FOUNDRY_FINANCIAL <sub>: ... 403 AUTH (API key provided does not have permission to view payments.)` | A technician key: it authenticates but lacks financial access, so the money fields are `null` until a financial key is configured |
 | `ERR_FOUNDRY_API <path> 0 REQUEST_FAILED (ECONNREFUSED)` | No response: DNS, connection or TLS failure, or the 30 s timeout (`request-timeout`). Check `apiUrl` and outbound HTTPS |
 | `ERR_FOUNDRY_API <path> 200 INVALID_RESPONSE` | The server answered, but not in the documented shape |
 | `ERR_FOUNDRY_API <path> 200 TRUNCATED_WORKERS` | The worker list came back shorter than the total the API reported |
@@ -253,11 +279,14 @@ npm run mock
 The mock listens on `127.0.0.1:8010` and serves the routes above with the
 API's auth gate and error envelopes: 403 `Not authenticated` without a
 credential, 403 `Invalid API key` for an unknown key, 401 for an unknown
-personal access token, 403 for a key issued to another sub-account, and 404
-for an unknown sub-account. The fixtures in `mock/keys.js` are public and do
-not work against Foundry. In tests, `createServer({ port: 0 })` picks a free
-port and returns the server handle. The options `accounts`, `apiKeys`,
-`pats`, `workerCount`, `delayMs` and `error` shape the mock's behaviour.
+personal access token, 403 for a key issued to another sub-account, 403
+`API key provided does not have permission to view payments.` on the
+balance, earnings and transaction routes for a technician key, 404 for an unknown sub-account, and 429 with the `x-ratelimit-*` headers
+once a credential exceeds `rateLimit` requests in a minute (default 300). The fixtures in `mock/keys.js` are
+public and do not work against Foundry. In tests, `createServer({ port: 0 })`
+picks a free port and returns the server handle. The options `accounts`,
+`apiKeys`, `technicianKeys`, `pats`, `workerCount`, `delayMs`, `error` and
+`rateLimit` shape the mock's behaviour.
 
 ## Security
 
