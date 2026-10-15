@@ -1,5 +1,9 @@
 'use strict'
 
+// Adapted from Tether MDK v0.10.0, backend/workers/minerpools/ocean/mock/initial_states/utils.js
+// (https://github.com/tetherto/mdk, Apache-2.0, Copyright Tether and contributors).
+// Modified by Foundry Digital LLC. See NOTICE.
+
 const crypto = require('crypto')
 
 const DAY_MS = 24 * 60 * 60 * 1000

@@ -258,3 +258,13 @@ for an unknown sub-account. The fixtures in `mock/keys.js` are public and do
 not work against Foundry. In tests, `createServer({ port: 0 })` picks a free
 port and returns the server handle. The options `accounts`, `apiKeys`,
 `pats`, `workerCount`, `delayMs` and `error` shape the mock's behaviour.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
+
+## License
+
+Copyright 2026 Foundry Digital LLC. Licensed under the
+[Apache License, Version 2.0](LICENSE). Portions are adapted from
+[Tether MDK](https://github.com/tetherto/mdk); see [NOTICE](NOTICE).
