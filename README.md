@@ -111,10 +111,10 @@ local config file or in environment variables.
 The API accepts two credential types; the worker picks the header from the
 value:
 
-- **Sub-account API key** (Settings → API keys in the pool UI), sent as
+- **Sub-account API key** (Sub-account → Links & API tab in the pool UI), sent as
   `X-API-KEY`. Foundry issues these per sub-account and a key only ever sees
   the sub-account it was issued for, so each entry needs its own.
-- **Personal access token** (Trust Center → Personal access tokens),
+- **Personal access token** (My Profile → Personal Access Token tab),
   recognised by its `fdpat_` prefix and sent as `Authorization: Bearer`. A
   token is user-scoped and read-only, so one token in `apiKey` can cover every
   sub-account its user can see.

@@ -15,7 +15,7 @@ module.exports = {
   BTC_SATS: 100000000,
 
   // Credentials: a sub-account API key travels as X-API-KEY; a personal
-  // access token (Trust Center) carries this prefix and travels as a Bearer.
+  // access token (My Profile → Personal Access Token tab) carries this prefix and travels as a Bearer.
   API_KEY_HEADER: 'X-API-KEY',
   AUTH_HEADER: 'Authorization',
   PAT_PREFIX: 'fdpat_',
