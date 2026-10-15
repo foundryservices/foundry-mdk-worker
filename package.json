@@ -10,6 +10,14 @@
   ],
   "author": "Foundry Digital",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/foundryservices/foundry-mdk-worker.git"
+  },
+  "homepage": "https://github.com/foundryservices/foundry-mdk-worker#readme",
+  "bugs": {
+    "url": "https://github.com/foundryservices/foundry-mdk-worker/issues"
+  },
   "main": "index.js",
   "engines": {
     "node": ">=24"
@@ -23,7 +31,8 @@
     "config/*.example",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "SECURITY.md"
   ],
   "scripts": {
     "setup:mdk": "npm --prefix node_modules/@tetherto/mdk install --ignore-scripts",

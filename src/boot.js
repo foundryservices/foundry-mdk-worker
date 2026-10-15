@@ -1,5 +1,9 @@
 'use strict'
 
+// Adapted from Tether MDK v0.10.0, backend/workers/minerpools/ocean/plugin/boot.js
+// (https://github.com/tetherto/mdk, Apache-2.0, Copyright Tether and contributors).
+// Modified by Foundry Digital LLC. See NOTICE.
+
 const { WorkerRuntime } = require('./mdk')
 const FoundryPool = require('./pool')
 const plugin = require('./plugin')

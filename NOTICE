@@ -1,7 +1,22 @@
 Foundry MDK Worker
 Copyright 2026 Foundry Digital LLC
 
-This product is a Worker for the Tether MDK project, which is licensed
-under the Apache License, Version 2.0. It builds on the MDK PoolService
-and WorkerRuntime and follows the layout of the MDK F2Pool and Ocean
-workers.
+This product includes software derived from the Tether Mining Development
+Kit (MDK), https://github.com/tetherto/mdk, version 0.10.0,
+Copyright Tether and contributors, licensed under the Apache License,
+Version 2.0 (see LICENSE).
+
+The following files contain code adapted from MDK and have been modified
+by Foundry Digital LLC:
+
+  src/plugin.js       adapted from backend/workers/minerpools/ocean/plugin/index.js
+  src/boot.js         adapted from backend/workers/minerpools/ocean/plugin/boot.js
+  mock/generators.js  random-value helpers adapted from
+                      backend/workers/minerpools/ocean/mock/initial_states/utils.js
+  mdk-contract.json   health, alert and error entries adapted from
+                      backend/workers/minerpools/ocean/plugin/mdk-contract.json
+
+The upstream MDK distribution carries no NOTICE file and no per-file
+copyright headers as of version 0.10.0. The worker runs on the MDK
+PoolService and WorkerRuntime, consumed unmodified as the @tetherto/mdk
+npm dependency.
