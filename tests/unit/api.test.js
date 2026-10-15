@@ -14,6 +14,20 @@ function makeHttp (handler) {
   }
 }
 
+// Like makeHttp, but the handler returns the facility's whole `{ body, headers }`.
+function makeRawHttp (handler) {
+  const calls = []
+  return {
+    calls,
+    get: async (url, opts) => {
+      calls.push({ url: new URL(url), opts, at: Date.now() })
+      return handler(url, opts, calls.length)
+    }
+  }
+}
+
+const resetHeader = inMs => String(Math.ceil((Date.now() + inMs) / 1000))
+
 test('validateConfig rejects an unsupported coin or a URL with extras', t => {
   t.exception(() => new FoundryApi({}, { coin: 'LTC' }), /ERR_FOUNDRY_COIN_UNSUPPORTED/)
   t.exception(() => new FoundryApi({}, { apiUrl: 'ftp://x' }), /ERR_FOUNDRY_API_URL_INVALID/)
@@ -118,6 +132,48 @@ test('transport errors carry status, a code and the API message but no headers',
   const timedOut = makeHttp(async () => { throw Object.assign(new Error('network timeout'), { type: 'request-timeout' }) })
   const e2 = await new FoundryApi(timedOut, { requestIntervalMs: 0 }).getBalance('s', 'k').catch(e => e)
   t.is(e2.detail, 'request-timeout')
+})
+
+test('a 429 waits for the window reset and retries, then gives up as RATE_LIMITED', async t => {
+  const resetAt = Number(resetHeader(300)) * 1000
+  const http = makeRawHttp(async (url, opts, n) => {
+    if (n === 1) throw Object.assign(new Error('ERR_HTTP: 429'), { status: 429, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(resetAt / 1000) } })
+    return { body: { ok: true }, headers: {} }
+  })
+  const api = new FoundryApi(http, { requestIntervalMs: 0 })
+  t.is((await api.getBalance('s', 'k')).ok, true)
+  t.is(http.calls.length, 2)
+  t.ok(http.calls[1].at >= resetAt - 5, `retried at reset (${http.calls[1].at - resetAt}ms)`)
+
+  // Without a usable reset the fallback wait applies; after the retries a 429 is the caller's problem.
+  const always = makeRawHttp(async () => { throw Object.assign(new Error('x'), { status: 429, headers: { 'retry-after': '0' } }) })
+  const limited = new FoundryApi(always, { requestIntervalMs: 0, rateLimitFallbackMs: 5 })
+  const err = await limited.getBalance('s', 'k').catch(e => e)
+  t.is(err.code, 'RATE_LIMITED')
+  t.is(always.calls.length, 3, 'one attempt plus two retries')
+  t.absent(err.headers)
+})
+
+test('a spent budget pauses the credential until the reset before the next request', async t => {
+  const resetAt = Number(resetHeader(300)) * 1000
+  const http = makeRawHttp(async (url, opts, n) => ({
+    body: {},
+    headers: n === 1 ? { 'x-ratelimit-limit': '300', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(resetAt / 1000) } : {}
+  }))
+  const api = new FoundryApi(http, { requestIntervalMs: 0 })
+  await api.getBalance('s', 'k')
+  await api.getBalance('s', 'k')
+  t.ok(http.calls[1].at >= resetAt - 5, `second request waited for the reset (${http.calls[1].at - resetAt}ms)`)
+  await api.getBalance('s', 'k')
+  t.ok(http.calls[2].at - http.calls[1].at < 100, 'the pause is consumed, not repeated')
+
+  // A reset that is already in the past pauses nothing; a past reset on a 429 falls back to retry-after.
+  const past = makeRawHttp(async () => ({ body: {}, headers: { 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1' } }))
+  const quick = new FoundryApi(past, { requestIntervalMs: 0 })
+  await quick.getBalance('s', 'k')
+  const before = Date.now()
+  await quick.getBalance('s', 'k')
+  t.ok(Date.now() - before < 100, 'no wait on a stale reset')
 })
 
 test('a worker list shorter than the reported total is rejected as truncated', async t => {

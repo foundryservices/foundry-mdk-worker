@@ -3,7 +3,10 @@
 const { setTimeout: sleep } = require('node:timers/promises')
 const { FoundryApiError } = require('../errors')
 const { authHeaders } = require('../utils/accounts')
-const { COIN, DEFAULT_API_URL, REQUEST_INTERVAL_MS, REQUEST_TIMEOUT_MS } = require('../constants')
+const {
+  COIN, DEFAULT_API_URL, REQUEST_INTERVAL_MS, REQUEST_TIMEOUT_MS,
+  RATE_LIMIT_MAX_WAIT_MS, RATE_LIMIT_RETRIES, RATE_LIMIT_FALLBACK_WAIT_MS
+} = require('../constants')
 
 /**
  * @typedef {Object} FoundryApiOptions
@@ -11,6 +14,7 @@ const { COIN, DEFAULT_API_URL, REQUEST_INTERVAL_MS, REQUEST_TIMEOUT_MS } = requi
  * @property {'BTC'} [coin]
  * @property {AbortSignal} [signal]       aborts waits and in-flight requests
  * @property {number} [requestIntervalMs] minimum spacing between requests
+ * @property {number} [rateLimitFallbackMs] wait before retrying a 429 that names no reset
  */
 
 /**
@@ -22,7 +26,14 @@ const { COIN, DEFAULT_API_URL, REQUEST_INTERVAL_MS, REQUEST_TIMEOUT_MS } = requi
  * Concurrency model:
  *  - every call goes through one promise chain (`_queue`), so requests from
  *    stats, workers and history polling never interleave;
- *  - `_waitForRateLimit` spaces consecutive requests by `requestIntervalMs`.
+ *  - `_waitForRateLimit` spaces consecutive requests by `requestIntervalMs`;
+ *  - the API's rate limit is per credential (API key, or user for a PAT) and
+ *    every response reports it in `x-ratelimit-remaining` / `x-ratelimit-reset`.
+ *    When the budget hits zero, the next request on that credential waits for
+ *    the reset; a 429 waits the same way and is retried. Because the queue is
+ *    serial, that wait also holds requests on other credentials, which is
+ *    acceptable: one worker alone stays well under the limit, so a spent budget
+ *    means something else is using the same credential.
  */
 class FoundryApi {
   /**
@@ -30,7 +41,10 @@ class FoundryApi {
    * @param {FoundryApiOptions} options
    */
   constructor (http, options = {}) {
-    const { apiUrl = DEFAULT_API_URL, coin = COIN, signal, requestIntervalMs = REQUEST_INTERVAL_MS } = options
+    const {
+      apiUrl = DEFAULT_API_URL, coin = COIN, signal,
+      requestIntervalMs = REQUEST_INTERVAL_MS, rateLimitFallbackMs = RATE_LIMIT_FALLBACK_WAIT_MS
+    } = options
     FoundryApi.validateConfig({ apiUrl, coin })
 
     this._http = http
@@ -38,9 +52,12 @@ class FoundryApi {
     this._coin = coin
     this._signal = signal
     this._requestIntervalMs = requestIntervalMs
+    this._rateLimitFallbackMs = rateLimitFallbackMs
 
     this._nextRequestAt = 0
     this._queue = Promise.resolve()
+    /** credential -> ms timestamp before which it must not be used */
+    this._pausedUntil = new Map()
   }
 
   static validateConfig ({ apiUrl = DEFAULT_API_URL, coin = COIN }) {
@@ -119,26 +136,34 @@ class FoundryApi {
   }
 
   async _send (path, credential, query) {
-    this._signal?.throwIfAborted()
-    await this._waitForRateLimit()
-
     const url = this._buildUrl(path, query)
     const headers = { Accept: 'application/json', ...(credential ? authHeaders(credential) : {}) }
 
-    let response
-    try {
-      response = await this._http.get(url, {
-        headers,
-        encoding: 'json',
-        timeout: REQUEST_TIMEOUT_MS,
-        signal: this._signal,
-        redirect: false
-      })
-    } catch (err) {
+    for (let attempt = 0; ; attempt++) {
       this._signal?.throwIfAborted()
-      throw FoundryApiError.transport(path, err)
+      await this._waitForBudget(credential)
+      await this._waitForRateLimit()
+
+      let response
+      try {
+        response = await this._http.get(url, {
+          headers,
+          encoding: 'json',
+          timeout: REQUEST_TIMEOUT_MS,
+          signal: this._signal,
+          redirect: false
+        })
+      } catch (err) {
+        this._signal?.throwIfAborted()
+        if (err?.status === 429 && attempt < RATE_LIMIT_RETRIES) {
+          this._pause(credential, resetFrom(err.headers) ?? Date.now() + this._rateLimitFallbackMs)
+          continue
+        }
+        throw FoundryApiError.transport(path, err)
+      }
+      this._noteBudget(credential, response?.headers)
+      return response?.body
     }
-    return response?.body
   }
 
   async _waitForRateLimit () {
@@ -146,6 +171,29 @@ class FoundryApi {
       await sleep(this._nextRequestAt - Date.now(), undefined, { signal: this._signal })
     }
     this._nextRequestAt = Date.now() + this._requestIntervalMs
+  }
+
+  /** A response that reports the budget spent pauses its credential until the reset. */
+  _noteBudget (credential, headers) {
+    if (headerNumber(headers, 'x-ratelimit-remaining') === 0) {
+      const resetAt = resetFrom(headers)
+      if (resetAt) this._pause(credential, resetAt)
+    }
+  }
+
+  _pause (credential, until) {
+    this._pausedUntil.set(credential || '', Math.min(until, Date.now() + RATE_LIMIT_MAX_WAIT_MS))
+  }
+
+  async _waitForBudget (credential) {
+    const key = credential || ''
+    const until = this._pausedUntil.get(key)
+    if (until === undefined) return
+    const wait = until - Date.now()
+    if (wait > 0) {
+      await sleep(wait, undefined, { signal: this._signal })
+    }
+    this._pausedUntil.delete(key)
   }
 
   _buildUrl (path, query) {
@@ -157,6 +205,34 @@ class FoundryApi {
     }
     return `${this._baseUrl}${path}?${params}`
   }
+}
+
+function header (headers, name) {
+  if (!headers || typeof headers !== 'object') return undefined
+  const key = Object.keys(headers).find(k => k.toLowerCase() === name)
+  const value = key === undefined ? undefined : headers[key]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function headerNumber (headers, name) {
+  const value = header(headers, name)
+  if (value === undefined || value === null || value === '') return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * The ms timestamp at which the credential's window resets, from
+ * `x-ratelimit-reset` (unix seconds) or, failing that, `retry-after`
+ * (seconds). Null when neither is usable or the reset is already past.
+ */
+function resetFrom (headers) {
+  const now = Date.now()
+  const reset = headerNumber(headers, 'x-ratelimit-reset')
+  if (reset !== null && reset * 1000 > now) return reset * 1000
+  const retryAfter = headerNumber(headers, 'retry-after')
+  if (retryAfter !== null && retryAfter > 0) return now + retryAfter * 1000
+  return null
 }
 
 function isPlainHttpUrl (value) {

@@ -16,11 +16,13 @@ const DEFAULT_PORT = 8010
  * @param {string} [options.host]
  * @param {number} [options.port]         0 picks a free port
  * @param {Object<string, object>} [options.accounts]  name -> state (default: one `test` sub-account)
- * @param {Object<string, string>} [options.apiKeys]   name -> accepted X-API-KEY
+ * @param {Object<string, string>} [options.apiKeys]   name -> accepted X-API-KEY with financial access
+ * @param {Object<string, string>} [options.technicianKeys]  name -> accepted X-API-KEY without financial access
  * @param {string[]} [options.pats]       accepted personal access tokens
  * @param {number} [options.workerCount]  workers under the default sub-account
  * @param {number} [options.delayMs]
  * @param {boolean} [options.error]       answer 500 on every route
+ * @param {number} [options.rateLimit]    requests per minute per credential, with the API's headers (default 300)
  * @returns {Promise<{ app: import('fastify').FastifyInstance, apiUrl: string, accounts: object }>}
  */
 async function createServer (options = {}) {
@@ -30,13 +32,15 @@ async function createServer (options = {}) {
     workerCount,
     accounts = { [keys.subAccount]: createState({ name: keys.subAccount, workerCount }) },
     apiKeys = { [keys.subAccount]: keys.apiKey },
+    technicianKeys = { [keys.subAccount]: keys.technicianKey },
     pats = [keys.pat],
     delayMs,
-    error
+    error,
+    rateLimit
   } = options
 
   const app = fastify({ logger: false })
-  app.register(routes, { accounts, apiKeys, pats, delayMs, error })
+  app.register(routes, { accounts, apiKeys, technicianKeys, pats, delayMs, error, rateLimit })
 
   try {
     const url = await app.listen({ host, port })
@@ -61,7 +65,7 @@ async function main () {
     port: Number(values.port),
     workerCount: values.workerCount ? Number(values.workerCount) : undefined
   })
-  console.log(`Foundry mock listening at ${apiUrl} (sub-account "${keys.subAccount}", X-API-KEY ${keys.apiKey}, PAT ${keys.pat})`)
+  console.log(`Foundry mock listening at ${apiUrl} (sub-account "${keys.subAccount}", X-API-KEY ${keys.apiKey}, technician X-API-KEY ${keys.technicianKey}, PAT ${keys.pat})`)
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => app.close())

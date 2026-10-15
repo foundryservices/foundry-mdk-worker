@@ -2,7 +2,7 @@
 
 const { PoolService } = require('./mdk')
 const FoundryApi = require('./api/client')
-const { DataError } = require('./errors')
+const { DataError, FoundryApiError } = require('./errors')
 const { parseAccounts } = require('./utils/accounts')
 const { toNumber, toOptionalNumber, ghsToHs, optionalGhsToHs, btcToSats } = require('./utils/numbers')
 const { toTimestamp, toOptionalTimestamp, dateString, monthKey, previousDay, getMonthlyDateRanges } = require('./utils/dates')
@@ -19,10 +19,10 @@ const toSecondTs = time => Math.floor(time.getTime() / 1000) * 1000
  * @typedef {Object} AccountStats
  * @property {string} username           sub-account name
  * @property {number} timestamp          ms when the snapshot was taken
- * @property {number} balance            BTC, unpaid credited balance
+ * @property {number|null} balance       BTC, unpaid credited balance; null without financial access
  * @property {null} unsettled            the API does not expose pending credits
- * @property {number} revenue_24h        BTC credited for the latest settled UTC day
- * @property {number} estimated_today_income  revenue_24h scaled by today's 24h hashrate
+ * @property {number|null} revenue_24h   BTC credited for the latest settled UTC day; null without financial access
+ * @property {number|null} estimated_today_income  revenue_24h scaled by today's 24h hashrate; null without financial access
  * @property {number} hashrate           H/s, 5 minute average
  * @property {number} hashrate_15m       H/s
  * @property {number} hashrate_1h        H/s
@@ -35,10 +35,12 @@ const toSecondTs = time => Math.floor(time.getTime() / 1000) * 1000
  * @property {number|null} offline_workers_count  offline15MinWorkerCount + offline24HrWorkerCount; the API's
  *                                            24h figure already includes the week-plus buckets
  * @property {number|null} last_share_time     ms
- * @property {number} total_earned       BTC, lifetime
- * @property {number} total_withdrawn    BTC, lifetime
- * @property {number} total_pool_fees    BTC, lifetime
- * @property {MonthlyBalance[]} yearlyBalances
+ * @property {number|null} total_earned  BTC, lifetime; null without financial access
+ * @property {number|null} total_withdrawn  BTC, lifetime; null without financial access
+ * @property {number|null} total_pool_fees  BTC, lifetime; null without financial access
+ * @property {MonthlyBalance[]} yearlyBalances  empty without financial access
+ * @property {boolean} financial_access  false when the credential is refused on the balance,
+ *                                       earnings or transaction endpoints (a technician key)
  */
 
 /**
@@ -74,6 +76,13 @@ const toSecondTs = time => Math.floor(time.getTime() / 1000) * 1000
  * A total summed over the sub-accounts that happened to work would be a
  * number nobody can act on.
  *
+ * The one tolerated partial result is a credential without financial access
+ * (a technician API key): the stats call succeeds, then /balance, /v2/earnings
+ * and /transactions answer 403. The poll keeps the hashrate and worker
+ * figures, reports the money fields as null, flags `financial_access: false`,
+ * and logs the refusal once per sub-account. The balance and earnings
+ * metrics answer E_POOL_API for that account; nothing is summed as zero.
+ *
  * Blocks are not fetched: the Foundry /blocks endpoint needs an admin
  * credential, which a customer credential never has.
  */
@@ -83,6 +92,7 @@ class FoundryPool extends PoolService {
     this._inFlight = new Map()
     this._history = new Map()
     this._statsError = null
+    this._financialDenied = new Set()
   }
 
   async init () {
@@ -240,7 +250,7 @@ class FoundryPool extends PoolService {
         return cached.balances
       }
 
-      const balances = await this._fetchMonthlyEarnings(username, credential, ranges)
+      const balances = await this._financial(username, () => this._fetchMonthlyEarnings(username, credential, ranges)) || []
       this._history.set(username, { month: ranges[0].month, ts: Date.now(), balances })
       return balances
     })
@@ -287,8 +297,10 @@ class FoundryPool extends PoolService {
   /** @returns {Promise<AccountStats>} */
   async _fetchAccountStats (username, credential, time) {
     const acct = await this.foundryApi.getSubAccountStats(username, credential)
-    const bal = await this.foundryApi.getBalance(username, credential)
-    const earnings = await this._fetchLatestEarnings(username, credential, time)
+    // The stats call above succeeded with this credential, so a 403 from the
+    // money endpoints below is a scope problem, not a bad key.
+    const bal = await this._financial(username, () => this.foundryApi.getBalance(username, credential))
+    const earnings = await this._financial(username, () => this._fetchLatestEarnings(username, credential, time))
     const yearlyBalances = await this.getYearlyBalances(username, credential, time)
 
     const hashrate24h = ghsToHs(acct.hashrate24hrAvg, 'stats.hashrate24hrAvg')
@@ -302,10 +314,10 @@ class FoundryPool extends PoolService {
     return {
       username,
       timestamp: Date.now(),
-      balance: toNumber(bal.balance, 'balance.balance'),
+      balance: bal ? toNumber(bal.balance, 'balance.balance') : null,
       unsettled: null,
-      revenue_24h: earnings.revenue,
-      estimated_today_income: estimateTodayIncome(earnings, hashrate24h),
+      revenue_24h: earnings ? earnings.revenue : null,
+      estimated_today_income: earnings ? estimateTodayIncome(earnings, hashrate24h) : null,
       hashrate: ghsToHs(acct.hashrate5minAvg, 'stats.hashrate5minAvg'),
       hashrate_15m: ghsToHs(acct.hashrate15minAvg, 'stats.hashrate15minAvg'),
       hashrate_1h: ghsToHs(acct.hashrate1hrAvg, 'stats.hashrate1hrAvg'),
@@ -317,10 +329,39 @@ class FoundryPool extends PoolService {
       active_workers_count: toNumber(acct.activeWorkers, 'stats.activeWorkers'),
       offline_workers_count: offline15m === null && offline24h === null ? null : (offline15m || 0) + (offline24h || 0),
       last_share_time: toOptionalTimestamp(acct.lastShareTime, 'stats.lastShareTime'),
-      total_earned: toNumber(bal.totalEarned, 'balance.totalEarned'),
-      total_withdrawn: toNumber(bal.totalWithdrawn, 'balance.totalWithdrawn'),
-      total_pool_fees: toNumber(bal.totalPoolFees, 'balance.totalPoolFees'),
-      yearlyBalances
+      total_earned: bal ? toNumber(bal.totalEarned, 'balance.totalEarned') : null,
+      total_withdrawn: bal ? toNumber(bal.totalWithdrawn, 'balance.totalWithdrawn') : null,
+      total_pool_fees: bal ? toNumber(bal.totalPoolFees, 'balance.totalPoolFees') : null,
+      yearlyBalances,
+      financial_access: !this._financialDenied.has(username)
+    }
+  }
+
+  /**
+   * Runs a call to a money endpoint (/balance, /v2/earnings, /transactions).
+   * A 401/403 there means the credential authenticates but lacks financial
+   * access, which is what a technician API key looks like: the call yields
+   * null and the refusal is logged once per sub-account. Anything else is
+   * rethrown and fails the poll as usual.
+   * @template T
+   * @param {string} username
+   * @param {() => Promise<T>} job
+   * @returns {Promise<T|null>}
+   */
+  async _financial (username, job) {
+    try {
+      const result = await job()
+      this._financialDenied.delete(username)
+      return result
+    } catch (err) {
+      if (!(err instanceof FoundryApiError) || err.code !== 'AUTH') {
+        throw err
+      }
+      if (!this._financialDenied.has(username)) {
+        this._financialDenied.add(username)
+        this._logErr(`WARN_FOUNDRY_FINANCIAL ${username}`, `${err.message}: credential has no financial access, balance and earnings reported as null`)
+      }
+      return null
     }
   }
 
@@ -356,7 +397,7 @@ class FoundryPool extends PoolService {
 
   /** @returns {Promise<Transaction[]>} */
   async _fetchAccountTransactions (username, credential, day) {
-    const rows = await this.foundryApi.getTransactions(username, credential, day.start, day.end)
+    const rows = await this._financial(username, () => this.foundryApi.getTransactions(username, credential, day.start, day.end)) || []
 
     const transactions = []
     for (const row of rows) {

@@ -12,6 +12,7 @@ const path = require('node:path')
 const { FOUNDRY_POOL } = require('..')
 
 const METRIC_FIELDS = ['hashrate', 'active_workers_count', 'balance', 'estimated_today_income']
+const FINANCIAL_FIELDS = ['balance', 'estimated_today_income']
 
 function readConfig (env) {
   const { FOUNDRY_API_URL: apiUrl, FOUNDRY_SUBACCOUNT: name, FOUNDRY_API_KEY: apiKey } = env
@@ -31,14 +32,22 @@ async function main () {
     await pool.fetchWorkers(new Date())
     await pool.fetchStats(new Date())
 
+    const [stats] = pool.data.statsData.stats
     for (const field of METRIC_FIELDS) {
+      if (!stats.financial_access && FINANCIAL_FIELDS.includes(field)) {
+        console.log(`${field}: unavailable (credential has no financial access)`)
+        continue
+      }
       if (!Number.isFinite(pool.getMetric(field))) {
         throw new Error(`Invalid ${field}`)
       }
       console.log(`${field}: OK`)
     }
-    const [stats] = pool.data.statsData.stats
-    console.log(`hashrate ${(stats.hashrate / 1e12).toFixed(2)} TH/s, workers ${stats.active_workers_count}/${stats.worker_count}, balance ${stats.balance} BTC`)
+    console.log(`hashrate ${(stats.hashrate / 1e12).toFixed(2)} TH/s, workers ${stats.active_workers_count}/${stats.worker_count}, balance ${stats.balance ?? 'n/a'} BTC`)
+    if (!stats.financial_access) {
+      console.log('Foundry live verification passed for hashrate and workers only: use a key with financial access to verify balance and earnings')
+      return
+    }
     console.log('Foundry live verification passed')
   } finally {
     await new Promise(resolve => pool.stop(resolve))
