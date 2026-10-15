@@ -141,11 +141,14 @@ the next poll fills the fields back in.
 | `balance` | BTC | `balance` from `/balance`, the unpaid credited balance |
 | `estimated_earnings` | BTC | Latest settled FPPS day from `/v2/earnings`, scaled by hashrate (below) |
 
-Foundry settles FPPS once per UTC day, so there is no intraday earnings
-figure. `revenue_24h` is the most recent settled day. `estimated_earnings`
-is that amount scaled by the ratio of the sub-account's current 24h hashrate
-to the hashrate the settled day was paid on, and falls back to the settled
-amount when either hashrate is unknown.
+Foundry adds FPPS earnings to your balance once a day, shortly after 01:00
+UTC, for the previous day. There is no earnings figure for today.
+
+- `revenue_24h` is yesterday's earnings. Before 01:00 UTC, yesterday's
+  earnings aren't in yet, so it shows the day before yesterday.
+- `estimated_earnings` is `revenue_24h` adjusted for your hashrate now. If
+  your hashrate is 10% higher than on that day, the estimate is 10% higher.
+  Without a hashrate to compare, it equals `revenue_24h`.
 
 Statistics refresh every minute and the worker list every five minutes. If a
 poll is still running when the next tick fires, the tick joins the running
@@ -161,10 +164,10 @@ happened to work and reports that as the total, and it never substitutes
 zero for a reading it did not get. The exception is a credential without
 financial access, described under Credentials: the poll completes with the
 money fields `null`. The one place a zero can stand in for an
-absence is the earnings ledger: an account with no settled rows in the window
-reports `revenue_24h`, `estimated_today_income` and the monthly totals as
-`0`, because the API does not distinguish an idle account from an empty
-response. The `stats` extension keeps the last good snapshot while polls fail
+absence is the earnings ledger. `revenue_24h` and `estimated_today_income`
+show `0` for a day with no earnings, such as a day with no mining. They also
+show `0` if Foundry's daily earnings run is late, until it finishes.
+The `stats` extension keeps the last good snapshot while polls fail
 and carries `error`, the last failure message, or `null`; nothing is written
 to the stats history while the snapshot is failed.
 
@@ -177,10 +180,11 @@ The `stats` extension carries the per-account values: the common fields
 `financial_access`). Per-worker rows
 add `hashrate_15m`, `stale_15m_percent`, `reject_15m_percent` and `tag`.
 `unsettled` and `hashrate_stale_24h` are `null` because the API does not
-expose them, and `worker_count` is `null` until the first workers poll. `yearlyBalances` holds earnings credited per month for the
+expose them, and `worker_count` is `null` until the first workers poll. `yearlyBalances` holds earnings per month for the
 current month and the eleven before it, from one ledger call per sub-account,
-cached for an hour and refreshed on month rollover. Every hashrate is in H/s;
-the API reports GH/s.
+cached for an hour and refreshed on month rollover. Each day counts toward
+the month it was earned in, even though the last day of a month is credited
+on the 1st. Every hashrate is in H/s; the API reports GH/s.
 
 Amounts become JavaScript numbers at the MDK boundary. Treat them as
 telemetry, not as figures for accounting or transaction signing.
@@ -199,13 +203,16 @@ On top of the base set (`stats`, `stats-history`, `workers`, `workers-count`,
 
 The daily job runs at midnight UTC and stores the transactions of the day
 that just ended, keyed by that day's UTC start. Each record has the
-sub-account, the Foundry transaction type (`FPPS`, `WITHDRAWAL`, ...), the
+sub-account, the Foundry transaction type (`FPPS`, `Auto-Withdraw`, ...), the
 amount in BTC (negative for debits), the time in Unix seconds, the
 transaction ID and payout address when Foundry supplies them, and
 `satoshis_net_earned` for credits. That last field is what the base service's
 hourly revenue aggregation sums, so
 `getWrkExtData({ query: { key: 'transactions', start, end, aggrHourly: true } })`
 works. Debits contribute zero to it.
+
+A day's `FPPS` credit is created early the next UTC day, so it lands in the
+next day's record.
 
 The F2Pool and Ocean workers key daily records by the host's local midnight.
 This worker keys them by UTC midnight, because Foundry settles and ledgers
@@ -261,6 +268,7 @@ for API trouble.
 | `ERR_FOUNDRY_API <path> 404 NOT_FOUND` | Unknown sub-account |
 | `ERR_FOUNDRY_API <path> 429 RATE_LIMITED` | Still rate limited after waiting for the window reset and retrying twice; another process is using the same credential's 300 requests per minute |
 | `WARN_FOUNDRY_FINANCIAL <sub>: ... 403 AUTH (API key provided does not have permission to view payments.)` | A technician key: it authenticates but lacks financial access, so the money fields are `null` until a financial key is configured |
+| `WARN_FOUNDRY_FINANCIAL <sub>: ... 403 AUTH (Insufficient privileges. Requires viewPayments ...)` | A personal access token whose user cannot view payments on that sub-account, so the money fields are `null` |
 | `ERR_FOUNDRY_API <path> 0 REQUEST_FAILED (ECONNREFUSED)` | No response: DNS, connection or TLS failure, or the 30 s timeout (`request-timeout`). Check `apiUrl` and outbound HTTPS |
 | `ERR_FOUNDRY_API <path> 200 INVALID_RESPONSE` | The server answered, but not in the documented shape |
 | `ERR_FOUNDRY_API <path> 200 TRUNCATED_WORKERS` | The worker list came back shorter than the total the API reported |
