@@ -46,7 +46,9 @@ To check a real credential against the API, put it in `FOUNDRY_API_KEY`, name
 the sub-account in `FOUNDRY_SUBACCOUNT` and run `node examples/verify-live.js`.
 `FOUNDRY_API_URL` points it at another deployment, for example staging. The
 script only reads, prints `OK` per metric and exits nonzero if any metric is
-unavailable.
+unavailable. To compare every field the worker reports with the API's own
+responses, use `npm run validate:live`; see
+[tools/validate](tools/validate/README.md).
 
 ## Usage
 
