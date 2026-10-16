@@ -275,6 +275,21 @@ test('fetchTransactions keeps a withdrawal in the day it was created when it con
   t.is(saved.transactions[0].created_at, Date.UTC(2024, 5, 27, 23, 50) / 1000)
 })
 
+test('fetchTransactions falls back to time without a broadcastTime and leaves a row at the day end to the next day', async t => {
+  const pool = newPool(undefined, {
+    // The API window is inclusive at both ends, so a row created exactly at
+    // midnight comes back for both days; it belongs to the later one.
+    getTransactions: async () => [
+      { time: '2024-06-27T01:00:01.000+00:00', broadcastTime: null, amount: 0.0001, type: 'FPPS', txId: null, address: null },
+      { time: '2024-06-28T00:00:00.000+00:00', broadcastTime: null, amount: 0.0002, type: 'FPPS', txId: null, address: null }
+    ]
+  })
+  await pool.fetchTransactions(new Date(Date.UTC(2024, 5, 28, 0, 0, 5)))
+  const [saved] = pool.transactionsDb.puts
+  t.is(saved.transactions.length, 1)
+  t.is(saved.transactions[0].created_at, Date.UTC(2024, 5, 27, 1, 0, 1) / 1000)
+})
+
 test('hourly revenue aggregation works on stored transactions', async t => {
   const pool = newPool()
   const day = Date.UTC(2024, 5, 27)

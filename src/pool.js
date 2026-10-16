@@ -55,7 +55,7 @@ const toSecondTs = time => Math.floor(time.getTime() / 1000) * 1000
  * @property {string|null} id            blockchain txId, null for credits
  * @property {string} type               Foundry's own type (FPPS, Auto-Withdraw, ...)
  * @property {number} changed_balance    BTC, negative for debits
- * @property {number} created_at         unix seconds
+ * @property {number} created_at         unix seconds; for a confirmed withdrawal, its creation, not its confirmation
  * @property {number} satoshis_net_earned  credits in satoshis, 0 for debits
  * @property {string|null} address       payout address for debits
  */
