@@ -152,7 +152,8 @@ UTC, for the previous day. There is no earnings figure for today.
   your hashrate is 10% higher than on that day, the estimate is 10% higher.
   Without a hashrate to compare, it equals `revenue_24h`.
 
-Statistics refresh every minute and the worker list every five minutes. If a
+Statistics refresh every minute and the list of online workers (a share in
+the last 15 minutes) every five minutes. If a
 poll is still running when the next tick fires, the tick joins the running
 poll instead of starting another. Metric handlers answer `E_POOL_API` until
 the first successful poll, after a failed poll, and whenever the snapshot is
@@ -179,10 +180,12 @@ The `stats` extension carries the per-account values: the common fields
 `worker_count`, `active_workers_count`, `yearlyBalances`) plus Foundry extras
 (`hashrate_15m`, `hashrate_reject_1h`, `offline_workers_count`,
 `last_share_time`, `total_earned`, `total_withdrawn`, `total_pool_fees`,
-`financial_access`). Per-worker rows
+`financial_access`). Per-worker rows cover the online workers and
 add `hashrate_15m`, `stale_15m_percent`, `reject_15m_percent` and `tag`.
 `unsettled` and `hashrate_stale_24h` are `null` because the API does not
-expose them, and `worker_count` is `null` until the first workers poll. `yearlyBalances` holds earnings per month for the
+expose them. `worker_count` is every worker the pool knows for the
+sub-account, online or offline: `active_workers_count` plus
+`offline_workers_count`. `yearlyBalances` holds earnings per month for the
 current month and the eleven before it, from one ledger call per sub-account,
 cached for an hour and refreshed on month rollover. Each day counts toward
 the month it was earned in, even though the last day of a month is credited

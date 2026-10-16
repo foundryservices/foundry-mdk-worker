@@ -80,7 +80,7 @@ function expectedFor ({ records, accounts, t0 }) {
 
     // --- the requests themselves match what the README says the worker asks for
     note(name, 'requested /subaccount_stats', Boolean(stats && stats.status === 200), stats && stats.status)
-    note(name, 'requested /workers with every worker (pageSize=-1, status=all)', Boolean(workers && workers.query.pageSize === '-1' && workers.query.status === 'all'), workers && workers.query)
+    note(name, 'requested /workers for the online workers (pageSize=-1, status=online<15min)', Boolean(workers && workers.query.pageSize === '-1' && workers.query.status === 'online<15min'), workers && workers.query)
     note(name, 'requested /v2/earnings for the latest settled day (window ends at poll time)', Boolean(latestCall), latestCall && `${isoDay(Number(latestCall.query.startDateUnixMs))}..now`)
     note(name, 'requested /v2/earnings for the current month and the 11 before', Boolean(yearCall && Number(yearCall.query.endDateUnixMs) === w.year.end), yearCall && yearCall.query)
     note(name, 'requested /transactions for the previous UTC day', Boolean(tx && Number(tx.query.startDateUnixMs) === w.previousDay.start && Number(tx.query.endDateUnixMs) === w.previousDay.end), tx && tx.query)
@@ -127,7 +127,8 @@ function expectedFor ({ records, accounts, t0 }) {
       hashrate_stale_1h: optionalHs(s.stale1hrAvg),
       hashrate_stale_24h: null,
       hashrate_reject_1h: optionalHs(s.reject1hrAvg),
-      worker_count: list ? list.length : null,
+      // "every worker the pool knows ... active_workers_count plus offline_workers_count"
+      worker_count: off15 === null && off24 === null ? null : num(s.activeWorkers) + (off15 || 0) + (off24 || 0),
       active_workers_count: num(s.activeWorkers),
       offline_workers_count: off15 === null && off24 === null ? null : (off15 || 0) + (off24 || 0),
       last_share_time: optionalTime(s.lastShareTime),
@@ -166,9 +167,8 @@ function expectedFor ({ records, accounts, t0 }) {
       }
       // API-level consistency, not worker behaviour
       const active = num(s.activeWorkers)
-      const totalFromStats = active + (off15 || 0) + (off24 || 0)
-      note(name, 'API: activeWorkers + offline counts = worker list length', totalFromStats === list.length, `${totalFromStats} vs ${list.length}`)
       // The two requests are seconds apart, so a worker can cross the 15-minute line in between.
+      note(name, 'API: online workers returned ≈ activeWorkers (±1%)', Math.abs(list.length - active) <= Math.max(2, active * 0.01), `${list.length} vs ${active}`)
       note(name, 'API: workers online at poll time (15 min) ≈ activeWorkers (±1%)', Math.abs(onlineAtPoll - active) <= Math.max(2, active * 0.01), `${onlineAtPoll} vs ${active}`)
       note(name, 'API: totalWorkerCount = rows returned', workers.body.totalWorkerCount === list.length, `${workers.body.totalWorkerCount} vs ${list.length}`)
     }

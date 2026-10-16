@@ -85,7 +85,7 @@ test('fetchStats builds a stats row per account in H/s and BTC', async t => {
   t.is(s.hashrate_stale_1h, 4 * GHS)
   t.is(s.hashrate_stale_24h, null)
   t.is(s.hashrate_reject_1h, 2 * GHS)
-  t.is(s.worker_count, 2)
+  t.is(s.worker_count, 6, '2 active + 1 offline under 24h + 3 offline over 24h')
   t.is(s.active_workers_count, 2)
   t.is(s.offline_workers_count, 4)
   t.is(s.revenue_24h, 0.01)
@@ -102,12 +102,18 @@ test('fetchStats builds a stats row per account in H/s and BTC', async t => {
   t.is(pool.getMetric('balance'), 0.5)
 })
 
-test('worker_count is null until the first workers poll', async t => {
+test('worker_count comes from the stats counts, with no workers poll needed, and is null without offline counts', async t => {
   const pool = newPool()
   pool.data.workersData = { ts: 0, workers: [] }
   await pool.fetchStats(new Date())
-  t.is(pool.data.statsData.stats[0].worker_count, null)
+  t.is(pool.data.statsData.stats[0].worker_count, 6, 'known before the first workers poll')
   t.is(pool.getMetric('active_workers_count'), 2, 'active workers come from the stats endpoint and stay live')
+
+  const noCounts = newPool(undefined, {
+    getSubAccountStats: async () => ({ ...ACCT, offline15MinWorkerCount: null, offline24HrWorkerCount: null })
+  })
+  await noCounts.fetchStats(new Date())
+  t.is(noCounts.data.statsData.stats[0].worker_count, null, 'no offline counts, no total')
 })
 
 test('estimated income falls back to the settled amount without a hashrate ratio', async t => {
