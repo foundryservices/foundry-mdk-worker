@@ -78,7 +78,7 @@ test('getWorkers disables paging and validates the list; ranged endpoints pass b
   const api = new FoundryApi(http, { requestIntervalMs: 0 })
   t.is((await api.getWorkers('s', 'k')).length, 1)
   t.is(http.calls[0].url.searchParams.get('pageSize'), '-1')
-  t.is(http.calls[0].url.searchParams.get('status'), 'all')
+  t.is(http.calls[0].url.searchParams.get('status'), 'online<15min', 'only online workers are requested')
   await api.getEarnings('s', 'k', 1000, 2000)
   t.is(http.calls[1].url.pathname, '/v2/earnings/s')
   t.is(http.calls[1].url.searchParams.get('startDateUnixMs'), '1000')

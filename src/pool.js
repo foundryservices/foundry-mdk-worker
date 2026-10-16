@@ -30,7 +30,8 @@ const toSecondTs = time => Math.floor(time.getTime() / 1000) * 1000
  * @property {number|null} hashrate_stale_1h   H/s
  * @property {null} hashrate_stale_24h   not published
  * @property {number|null} hashrate_reject_1h  H/s
- * @property {number|null} worker_count  workers known to the pool (last workers poll), null before the first
+ * @property {number|null} worker_count  every worker the pool knows, online or offline:
+ *                                       active_workers_count + offline_workers_count
  * @property {number} active_workers_count     workers with a share in the last 15 minutes
  * @property {number|null} offline_workers_count  offline15MinWorkerCount + offline24HrWorkerCount; the API's
  *                                            24h figure already includes the week-plus buckets
@@ -304,12 +305,10 @@ class FoundryPool extends PoolService {
     const yearlyBalances = await this.getYearlyBalances(username, credential, time)
 
     const hashrate24h = ghsToHs(acct.hashrate24hrAvg, 'stats.hashrate24hrAvg')
-    // The worker list comes from its own poll; before the first one there is
-    // no count to report, and null says so where a zero would lie.
-    const hasWorkersPoll = this.data.workersData.ts > 0
-    const workers = this.data.workersData.workers.filter(worker => worker.username === username)
+    const activeWorkers = toNumber(acct.activeWorkers, 'stats.activeWorkers')
     const offline15m = toOptionalNumber(acct.offline15MinWorkerCount, 'stats.offline15MinWorkerCount')
     const offline24h = toOptionalNumber(acct.offline24HrWorkerCount, 'stats.offline24HrWorkerCount')
+    const offlineWorkers = offline15m === null && offline24h === null ? null : (offline15m || 0) + (offline24h || 0)
 
     return {
       username,
@@ -325,9 +324,11 @@ class FoundryPool extends PoolService {
       hashrate_stale_1h: optionalGhsToHs(acct.stale1hrAvg, 'stats.stale1hrAvg'),
       hashrate_stale_24h: null,
       hashrate_reject_1h: optionalGhsToHs(acct.reject1hrAvg, 'stats.reject1hrAvg'),
-      worker_count: hasWorkersPoll ? workers.length : null,
-      active_workers_count: toNumber(acct.activeWorkers, 'stats.activeWorkers'),
-      offline_workers_count: offline15m === null && offline24h === null ? null : (offline15m || 0) + (offline24h || 0),
+      // The workers poll lists only online workers, so the total comes from
+      // the stats counts. Without them there is no total, and null says so.
+      worker_count: offlineWorkers === null ? null : activeWorkers + offlineWorkers,
+      active_workers_count: activeWorkers,
+      offline_workers_count: offlineWorkers,
       last_share_time: toOptionalTimestamp(acct.lastShareTime, 'stats.lastShareTime'),
       total_earned: bal ? toNumber(bal.totalEarned, 'balance.totalEarned') : null,
       total_withdrawn: bal ? toNumber(bal.totalWithdrawn, 'balance.totalWithdrawn') : null,

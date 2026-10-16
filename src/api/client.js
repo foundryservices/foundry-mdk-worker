@@ -75,17 +75,22 @@ class FoundryApi {
     return expectObject(path, await this._request(path, credential))
   }
 
-  /** GET /workers/{sub}: every worker (pageSize=-1 disables paging). */
+  /**
+   * GET /workers/{sub}: the workers with a share in the last 15 minutes
+   * (pageSize=-1 disables paging). Offline workers stay out of the response:
+   * the pool keeps them for a long time, so on a large sub-account they make
+   * up most of an unfiltered list.
+   */
   async getWorkers (account, credential) {
     const path = `/workers/${encodeURIComponent(account)}`
     const data = await this._request(path, credential, {
-      sort: 'highestHashrate', status: 'all', pageNumber: 0, pageSize: -1, tag: 'all'
+      sort: 'highestHashrate', status: 'online<15min', pageNumber: 0, pageSize: -1, tag: 'all'
     })
     if (!Array.isArray(data?.workersList)) {
       throw FoundryApiError.payload(path, 'INVALID_WORKERS')
     }
-    // pageSize=-1 asks for every worker; if the server ever caps a page, the
-    // count would be silently low, so hold it to the total it reports.
+    // pageSize=-1 asks for every matching worker; if the server ever caps a
+    // page, the count would be silently low, so hold it to the total it reports.
     if (Number.isFinite(data.totalWorkerCount) && data.totalWorkerCount !== data.workersList.length) {
       throw FoundryApiError.payload(path, 'TRUNCATED_WORKERS')
     }

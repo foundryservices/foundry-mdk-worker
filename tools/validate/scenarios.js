@@ -193,7 +193,10 @@ function startReplay (scenario) {
     } else if (p === `/subaccount_stats/${SUB}`) {
       body = (scenario.stats || stats)(t)
     } else if (p === `/workers/${SUB}`) {
-      body = (scenario.workers || workers)(t)
+      // Like the API, status=online<15min keeps only workers with a share in the last 15 minutes.
+      const all = (scenario.workers || workers)(t)
+      const list = q.status === 'online<15min' ? all.workersList.filter(wk => t - Date.parse(wk.lastShareTime) <= 15 * 60000) : all.workersList
+      body = { workersList: list, totalWorkerCount: scenario.workers ? all.totalWorkerCount : list.length }
     } else if (p === `/balance/${SUB}`) {
       body = balance
     } else if (p === `/v2/earnings/${SUB}`) {
