@@ -204,15 +204,17 @@ On top of the base set (`stats`, `stats-history`, `workers`, `workers-count`,
 The daily job runs at midnight UTC and stores the transactions of the day
 that just ended, keyed by that day's UTC start. Each record has the
 sub-account, the Foundry transaction type (`FPPS`, `Auto-Withdraw`, ...), the
-amount in BTC (negative for debits), the time in Unix seconds, the
-transaction ID and payout address when Foundry supplies them, and
+amount in BTC (negative for debits), the time it was created in Unix
+seconds, the transaction ID and payout address when Foundry supplies them, and
 `satoshis_net_earned` for credits. That last field is what the base service's
 hourly revenue aggregation sums, so
 `getWrkExtData({ query: { key: 'transactions', start, end, aggrHourly: true } })`
 works. Debits contribute zero to it.
 
 A day's `FPPS` credit is created early the next UTC day, so it lands in the
-next day's record.
+next day's record. A withdrawal belongs to the day it was created: one
+created before midnight UTC and confirmed after it stays in the earlier day,
+and its `created_at` is the creation, not the confirmation.
 
 The F2Pool and Ocean workers key daily records by the host's local midnight.
 This worker keys them by UTC midnight, because Foundry settles and ledgers
@@ -262,7 +264,8 @@ for API trouble.
 | `ERR_FOUNDRY_API_URL_INVALID` | `apiUrl` is not a plain http(s) URL |
 | `ERR_FOUNDRY_COIN_UNSUPPORTED` | `coin` is not `BTC` |
 | `ERR_FOUNDRY_ACCOUNT <sub>: ...` | That sub-account's part of a poll failed; the rest of the message says why |
-| `ERR_FOUNDRY_API <path> 403 AUTH (Invalid API key)` | The credential is unknown to this deployment. Check it was issued on the same environment |
+| `ERR_FOUNDRY_API <path> 401 AUTH (Invalid API key)` or `403 AUTH (Invalid API key)` | The credential is unknown to this deployment. Check it was issued on the same environment |
+| `ERR_FOUNDRY_API <path> 401 AUTH (API key expired)` | The API key passed the expiry set when it was created. Create a new one or rotate it under Links & API |
 | `ERR_FOUNDRY_API <path> 403 AUTH (Not authenticated)` | No credential reached the API |
 | `ERR_FOUNDRY_API <path> 401 AUTH (...)` | Invalid or expired personal access token |
 | `ERR_FOUNDRY_API <path> 404 NOT_FOUND` | Unknown sub-account |

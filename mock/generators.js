@@ -132,9 +132,11 @@ function generateTransactions (startMs, endMs, hashrateGhs, now = Date.now()) {
       address: null
     })
     if (Math.floor(Date.parse(e.startTime) / DAY_MS) % 10 === 0) {
+      // A confirmed withdrawal: `broadcastTime` is when it was created and
+      // `time` when it confirmed.
       txs.push({
-        time: isoOffset(creditTime + 8 * 60 * 60 * 1000),
-        broadcastTime: isoOffset(creditTime + 8 * 60 * 60 * 1000 + 30000),
+        time: isoOffset(creditTime + 8 * 60 * 60 * 1000 + 30000),
+        broadcastTime: isoOffset(creditTime + 8 * 60 * 60 * 1000),
         amount: -+(e.totalAmount * 9).toFixed(8),
         type: 'Auto-Withdraw',
         description: 'Auto-Withdraw',

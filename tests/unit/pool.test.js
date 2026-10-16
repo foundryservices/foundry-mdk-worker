@@ -244,7 +244,7 @@ test('fetchTransactions stores the previous UTC day with satoshis for credits on
   const pool = newPool(undefined, {
     getTransactions: async (u, c, start, end) => [
       { time: '2024-06-27T01:00:00.000+00:00', amount: 0.001, type: 'FPPS', txId: null },
-      { time: '2024-06-27T12:00:00.000+00:00', amount: -0.0005, type: 'WITHDRAWAL', txId: 'abc', address: 'bc1q' },
+      { time: '2024-06-27T12:00:00.000+00:00', amount: -0.0005, type: 'Auto-Withdraw', txId: 'abc', address: 'bc1q' },
       { time: '2024-06-28T00:00:00.000+00:00', amount: 9, type: 'FPPS' }
     ]
   })
@@ -258,6 +258,36 @@ test('fetchTransactions stores the previous UTC day with satoshis for credits on
   t.is(saved.transactions[1].id, 'abc')
   t.is(saved.transactions[1].satoshis_net_earned, 0)
   t.is(saved.transactions[1].address, 'bc1q')
+})
+
+test('fetchTransactions keeps a withdrawal in the day it was created when it confirms after midnight', async t => {
+  const pool = newPool(undefined, {
+    // Created 23:50 on the 27th, confirmed 00:20 on the 28th. The API returns
+    // it for the 27th, with the confirmation as `time`.
+    getTransactions: async () => [
+      { time: '2024-06-28T00:20:00.000+00:00', broadcastTime: '2024-06-27T23:50:00.000+00:00', amount: -0.0005, type: 'Auto-Withdraw', txId: 'abc', address: 'bc1q' }
+    ]
+  })
+  await pool.fetchTransactions(new Date(Date.UTC(2024, 5, 28, 0, 0, 5)))
+  const [saved] = pool.transactionsDb.puts
+  t.is(saved.ts, Date.UTC(2024, 5, 27))
+  t.is(saved.transactions.length, 1)
+  t.is(saved.transactions[0].created_at, Date.UTC(2024, 5, 27, 23, 50) / 1000)
+})
+
+test('fetchTransactions falls back to time without a broadcastTime and leaves a row at the day end to the next day', async t => {
+  const pool = newPool(undefined, {
+    // The API window is inclusive at both ends, so a row created exactly at
+    // midnight comes back for both days; it belongs to the later one.
+    getTransactions: async () => [
+      { time: '2024-06-27T01:00:01.000+00:00', broadcastTime: null, amount: 0.0001, type: 'FPPS', txId: null, address: null },
+      { time: '2024-06-28T00:00:00.000+00:00', broadcastTime: null, amount: 0.0002, type: 'FPPS', txId: null, address: null }
+    ]
+  })
+  await pool.fetchTransactions(new Date(Date.UTC(2024, 5, 28, 0, 0, 5)))
+  const [saved] = pool.transactionsDb.puts
+  t.is(saved.transactions.length, 1)
+  t.is(saved.transactions[0].created_at, Date.UTC(2024, 5, 27, 1, 0, 1) / 1000)
 })
 
 test('hourly revenue aggregation works on stored transactions', async t => {

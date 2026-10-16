@@ -53,9 +53,9 @@ const toSecondTs = time => Math.floor(time.getTime() / 1000) * 1000
  * @typedef {Object} Transaction
  * @property {string} username
  * @property {string|null} id            blockchain txId, null for credits
- * @property {string} type               Foundry's own type (FPPS, WITHDRAWAL, ...)
+ * @property {string} type               Foundry's own type (FPPS, Auto-Withdraw, ...)
  * @property {number} changed_balance    BTC, negative for debits
- * @property {number} created_at         unix seconds
+ * @property {number} created_at         unix seconds; for a confirmed withdrawal, its creation, not its confirmation
  * @property {number} satoshis_net_earned  credits in satoshis, 0 for debits
  * @property {string|null} address       payout address for debits
  */
@@ -401,7 +401,11 @@ class FoundryPool extends PoolService {
 
     const transactions = []
     for (const row of rows) {
-      const createdAt = toTimestamp(row?.time, 'transaction.time')
+      // The API selects rows by creation time. A confirmed withdrawal reports
+      // its confirmation as `time` and its creation as `broadcastTime`, so a
+      // withdrawal created before midnight and confirmed after it still
+      // belongs to this day.
+      const createdAt = toOptionalTimestamp(row?.broadcastTime, 'transaction.broadcastTime') ?? toTimestamp(row?.time, 'transaction.time')
       if (createdAt < day.start || createdAt >= day.end) {
         continue
       }
